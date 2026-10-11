@@ -68,24 +68,31 @@ document.getElementById('level-select').addEventListener('change',()=>{
 });
 document.getElementById('pause').addEventListener('click',pause);
 document.getElementById('sound').addEventListener('click',()=>{soundOn=!soundOn;const b=document.getElementById('sound');b.innerHTML='♪ <span>Ljud '+(soundOn?'på':'av')+'</span>';b.setAttribute('aria-label',soundOn?'Stäng av ljud':'Slå på ljud');tone(540);});
-document.getElementById('fullscreen').addEventListener('click',async()=>{
+const gameShell=document.getElementById('game-shell');
+function syncFullscreen(){
+  const expanded=!!document.fullscreenElement||gameShell.classList.contains('game-expanded');
   const button=document.getElementById('fullscreen');
-  try{
-    if(document.fullscreenElement)await document.exitFullscreen();
-    else await document.getElementById('app').requestFullscreen();
-  }catch{button.textContent='Fullskärm stöds inte';}
-});
-document.addEventListener('fullscreenchange',()=>{
-  const button=document.getElementById('fullscreen');
-  button.textContent=document.fullscreenElement?'⛶ Avsluta fullskärm':'⛶ Fullskärm';
-  button.setAttribute('aria-label',document.fullscreenElement?'Avsluta fullskärm':'Öppna fullskärm');
+  button.textContent=expanded?'✕':'⛶';
+  button.setAttribute('aria-label',expanded?'Avsluta fullskärm':'Öppna fullskärm');
+  button.setAttribute('title',expanded?'Avsluta fullskärm':'Öppna fullskärm');
+  document.body.classList.toggle('game-expanded-open',gameShell.classList.contains('game-expanded'));
   keys.clear();requestAnimationFrame(resize);canvas.focus();
+}
+document.getElementById('fullscreen').addEventListener('click',async()=>{
+  if(gameShell.classList.contains('game-expanded'))gameShell.classList.remove('game-expanded');
+  else if(document.fullscreenElement)await document.exitFullscreen();
+  else{
+    try{await gameShell.requestFullscreen();}
+    catch{gameShell.classList.add('game-expanded');}
+  }
+  syncFullscreen();
 });
+document.addEventListener('fullscreenchange',syncFullscreen);
 function press(code,repeat=false) {
   
   if(['Space','ArrowUp'].includes(code)&&!repeat){if(mode!=='playing'){start();return;}jumpBuffer=.14;}
   if(code==='KeyX'&&!repeat&&mode==='playing'&&player.attackCooldown===0){player.attack=.18;player.attackCooldown=.35;tone(180,.12,'sawtooth');}
-  if(code==='Escape'&&!repeat)pause();
+  if(code==='Escape'&&!repeat){if(gameShell.classList.contains('game-expanded')){gameShell.classList.remove('game-expanded');syncFullscreen();return;}pause();}
   keys.add(code);
 }
 window.addEventListener('keydown',e=>{if(['SELECT','INPUT'].includes(e.target.tagName))return;if(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Space','Escape','KeyX'].includes(e.code)){if(e.target.tagName==='BUTTON'&&['Space','Escape'].includes(e.code))return;e.preventDefault();press(e.code,e.repeat);}});
