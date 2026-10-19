@@ -2,8 +2,10 @@
 const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
 const overlay = document.getElementById('overlay'), play = document.getElementById('play');
 const keys = new Set(), worldWidth = 5700, ground = 532;
+const music = document.getElementById('music');
+music.volume = .35;
 let mode = 'ready', camera = 0, time = 0, last = 0, soundOn = true, audio, player, coins, enemies, particles = [], collected = 0, lives = Infinity, checkpoint = 80, jumpBuffer = 0, coyote = 0;
-let boss = null, levelNumber = 1, revealTimer = 0, poops = [], cameraY = 0, checkpointY = ground-68;
+let boss = null, levelNumber = 1, revealTimer = 0, poops = [], boogers = [], cameraY = 0, checkpointY = ground-68;
 const junglePlatforms = [
   {x:0,y:ground,w:920,h:150},{x:1080,y:ground,w:900,h:150},{x:2150,y:ground,w:1070,h:150},{x:3400,y:ground,w:840,h:150},{x:4420,y:ground,w:1280,h:150},
   {x:430,y:421,w:155,h:30},{x:720,y:338,w:145,h:30},{x:955,y:427,w:110,h:28},
@@ -30,12 +32,13 @@ const climbTrees=[600,2350,4350];
 const treePlatforms=[{x:0,y:ground,w:worldWidth,h:150},...climbTrees.map(x=>({x:x-120,y:140,w:240,h:30}))];
 const skyTrees=Array.from({length:8},(_,i)=>({x:i%2?480:220,top:160-i*320,bottom:ground-i*320}));
 const skyPlatforms=[{x:0,y:ground,w:700,h:150},...skyTrees.map(t=>({x:t.x-90,y:t.top,w:180,h:30}))];
+const shipPlatforms=[{x:0,y:ground,w:worldWidth,h:150},...[[500,420,190],[1050,325,180],[1580,410,210],[2350,400,190],[3000,310,200],[3650,410,190],[4520,400,210],[4950,310,180]].map(([x,y,w])=>({x,y,w,h:30}))];
 function climbingTree(){const trees=levelNumber===6?skyTrees:levelNumber===5?climbTrees.map(x=>({x,top:140,bottom:ground})):[];return trees.find(t=>Math.abs(player.x+player.w/2-t.x)<38&&player.y+player.h>=t.top&&player.y<t.bottom);}
 function nearbyTree(){return !!climbingTree();}
 function victorySound(){[523.25,659.25,783.99,1046.5,1318.51].forEach((freq,i)=>tone(freq,i===4?.55:.16,'triangle',.12,i*.17,freq));}
 function reset(level=levelNumber) {
-  levelNumber=level;platforms=level===1?junglePlatforms:level===2?bambooPlatforms:level===3?hauntedPlatforms:level===4?stealthPlatforms:level===5?treePlatforms:level===6?skyPlatforms:level===8?bambooPlatforms:junglePlatforms;keys.clear();revealTimer=0;
-  player = {x:80,y:ground-68,w:38,h:68,vx:0,vy:0,face:1,grounded:true,crouching:false,jumps:0,attack:0,attackCooldown:0,invincible:0,invisible:0,invisibilityCooldown:0,firePower:0};
+  levelNumber=level;platforms=level===1?junglePlatforms:level===2?bambooPlatforms:level===3?hauntedPlatforms:level===4?stealthPlatforms:level===5?treePlatforms:level===6?skyPlatforms:level===8?bambooPlatforms:level===10?shipPlatforms:junglePlatforms;keys.clear();revealTimer=0;boogers=[];
+  player = {x:80,y:ground-68,w:38,h:68,vx:0,vy:0,face:1,grounded:true,crouching:false,jumps:0,attack:0,attackCooldown:0,invincible:0,invisible:0,invisibilityCooldown:0,firePower:0,stepDistance:0};
   if(level===6)player.x=skyTrees[0].x-player.w/2;
   const positions=level===1?coinPositions:[[240,460],[300,460],[5200,460],[5280,460],...platforms.filter(p=>p.h===30).flatMap(p=>[[p.x+30,p.y-40],[p.x+p.w-30,p.y-40]])];
   coins = level===6?skyTrees.map(t=>({x:t.x,y:t.top-40,taken:false})):level===5?climbTrees.map(x=>({x,y:100,taken:false,crown:true})):positions.map(([x,y])=>({x,y,taken:false}));
@@ -47,6 +50,7 @@ function reset(level=levelNumber) {
   if(level===7)enemies=[680,1450,2460,3030,3750,4710,5170].map(x=>({x,y:ground-160,w:66,h:160,origin:x,dir:-1,kind:'livingTree',phase:'idle',timer:0,dead:false}));
   if(level===8)enemies=[650,1350,1900,2630,2900,3700,4800,5250].map((x,i)=>({x,y:ground-120-(i%2)*45,w:38,h:28,origin:x,dir:i%2?1:-1,kind:'fly',dead:false}));
   if(level===9)enemies=[640,1470,2440,3030,3750,4720,5160].map(x=>({x,y:ground-40,w:52,h:40,origin:x,dir:-1,kind:'dog',cooldown:0,grace:0,bark:0,dead:false}));
+  if(level===10)enemies=[720,1420,2140,2840,3540,4260,5070].map((x,i)=>({x,y:ground-74,w:44,h:74,origin:x,dir:-1,kind:'viking',cooldown:.8+i*.12,windup:0,dead:false}));
   document.getElementById('fire-status').hidden=true;
   document.getElementById('attack-control').setAttribute('aria-label',level===9?'Svansattack':'Kloattack');
   document.getElementById('attack-control').textContent=level===9?'↶':'✕';
@@ -55,13 +59,13 @@ function reset(level=levelNumber) {
   document.getElementById('invisibility').hidden=level!==7;
   particles=[];collected=0;lives=Infinity;checkpoint=player.x;checkpointY=ground-68;camera=0;cameraY=0;jumpBuffer=0;coyote=0;updateHud();
   boss=null;document.getElementById('boss-hud').hidden=true;
-  document.getElementById('chapter').textContent='KAPITEL 0'+level;
-  document.getElementById('level-title').textContent=level===1?'Det förlorade templet':level===2?'Bambudjungelns dojo':level===3?'Spökzombi skogen':level===4?'Osynlighetsbanan':level===5?'Trädtopparnas äventyr':level===6?'Mot molnen':level===7?'De vakande träden':level===8?'Flugornas stinkskog':'Voff bakom ryggen';
-  document.getElementById('location-name').textContent=level===1?'SMARAGDSKOGEN':level===2?'BAMBUSKOGEN':level===3?'SPÖKZOMBI SKOGEN':level===4?'OSYNLIGHETSSKOGEN':level===5?'TRÄDKRISTALLER 0 / 3':level===6?'MOT MOLNEN':level===7?'C · BLI OSYNLIG':level===8?'FLUGORNAS STINKSKOG':'VOFF BAKOM RYGGEN';
+  document.getElementById('chapter').textContent='KAPITEL '+String(level).padStart(2,'0');
+  document.getElementById('level-title').textContent=level===1?'Det förlorade templet':level===2?'Bambudjungelns dojo':level===3?'Spökzombi skogen':level===4?'Osynlighetsbanan':level===5?'Trädtopparnas äventyr':level===6?'Mot molnen':level===7?'De vakande träden':level===8?'Flugornas stinkskog':level===9?'Voff bakom ryggen':'Snor över relingen';
+  document.getElementById('location-name').textContent=level===1?'SMARAGDSKOGEN':level===2?'BAMBUSKOGEN':level===3?'SPÖKZOMBI SKOGEN':level===4?'OSYNLIGHETSSKOGEN':level===5?'TRÄDKRISTALLER 0 / 3':level===6?'MOT MOLNEN':level===7?'C · BLI OSYNLIG':level===8?'FLUGORNAS STINKSKOG':level===9?'VOFF BAKOM RYGGEN':'VIKINGASKEPPET';
   document.getElementById('crystal-icon').style.color=level===4?'#90ff9c':'';
   document.getElementById('progress-fill').style.width='0%';
   document.getElementById('level-select').value=String(level);
-  document.getElementById('overlay-copy').textContent=level===9?'Hundarna teleporterar bakom dig när du närmar dig och säger voff! Tryck X eller ↶ för att slå bakåt med svansen. Nå flaggan i slutet.':level===8?'Hoppa över bajskorvarna och se upp för flugorna! Besegra flugorna med X eller hoppa på dem. Nå flaggan i slutet.':level===7?'Tryck C eller ◌ för att bli osynlig i fem sekunder. De levande träden slår med rötterna när de ser dig. Kloattack gör dig synlig igen. Nå flaggan i slutet!':level===6?'Klättra uppåt med ↑. Hoppa mellan träden med Space och ← →, dubbelhoppa för extra räckvidd. Nå flaggan högst upp!':level===5?'Klättra med ↑ och ↓ intill de tre stora träden. Samla kristallen i varje trädtopp och nå målet. Se upp för skalbaggar!':level===4?'Samla gröna solkristaller för att avslöja osynliga fiender i tre sekunder. Följ ögonen i skuggorna!':'Samla solkristaller, hoppa över faror och hitta vägen till det förlorade templet.';
+  document.getElementById('overlay-copy').textContent=level===10?'Vikingarna kastar snorkråkor! Hoppa undan, slå bort snoret med X eller besegra vikingarna med klorna och hopp. Ta dig över däcket till drakstäven!':level===9?'Hundarna teleporterar bakom dig när du närmar dig och säger voff! Tryck X eller ↶ för att slå bakåt med svansen. Nå flaggan i slutet.':level===8?'Hoppa över bajskorvarna och se upp för flugorna! Besegra flugorna med X eller hoppa på dem. Nå flaggan i slutet.':level===7?'Tryck C eller ◌ för att bli osynlig i fem sekunder. De levande träden slår med rötterna när de ser dig. Kloattack gör dig synlig igen. Nå flaggan i slutet!':level===6?'Klättra uppåt med ↑. Hoppa mellan träden med Space och ← →, dubbelhoppa för extra räckvidd. Nå flaggan högst upp!':level===5?'Klättra med ↑ och ↓ intill de tre stora träden. Samla kristallen i varje trädtopp och nå målet. Se upp för skalbaggar!':level===4?'Samla gröna solkristaller för att avslöja osynliga fiender i tre sekunder. Följ ögonen i skuggorna!':'Samla solkristaller, hoppa över faror och hitta vägen till det förlorade templet.';
 }
 function updateHud() {
   document.getElementById('score').textContent=String(collected).padStart(2,'0');
@@ -71,22 +75,56 @@ function updateHud() {
 }
 async function tone(freq,duration=.12,type='sine',volume=.15,delay=0,endFreq=freq*.65) {
   if(!soundOn)return;
-  try{audio ||= new (window.AudioContext||window.webkitAudioContext)();if(audio.state!=='running')await audio.resume();if(!soundOn)return;const o=audio.createOscillator(),g=audio.createGain(),at=audio.currentTime+delay;o.type=type;o.frequency.setValueAtTime(freq,at);o.frequency.exponentialRampToValueAtTime(endFreq,at+duration);g.gain.setValueAtTime(volume,at);g.gain.exponentialRampToValueAtTime(.001,at+duration);o.connect(g);g.connect(audio.destination);o.start(at);o.stop(at+duration);}catch{soundOn=false;document.getElementById('sound').innerHTML='♪ <span>Ljud otillgängligt</span>';}
+  try{
+    audio ||= new (window.AudioContext||window.webkitAudioContext)();
+    if(audio.state!=='running')await audio.resume();if(!soundOn)return;
+    const g=audio.createGain(),at=audio.currentTime+delay;let source;
+    if(type==='noise'){
+      const buffer=audio.createBuffer(1,Math.ceil(audio.sampleRate*duration),audio.sampleRate),samples=buffer.getChannelData(0);
+      for(let i=0;i<samples.length;i++)samples[i]=Math.random()*2-1;
+      source=audio.createBufferSource();source.buffer=buffer;
+      const filter=audio.createBiquadFilter();filter.type='lowpass';filter.frequency.setValueAtTime(freq,at);filter.frequency.exponentialRampToValueAtTime(endFreq,at+duration);
+      source.connect(filter);filter.connect(g);
+    }else{
+      source=audio.createOscillator();source.type=type;source.frequency.setValueAtTime(freq,at);source.frequency.exponentialRampToValueAtTime(endFreq,at+duration);source.connect(g);
+    }
+    g.gain.setValueAtTime(.001,at);g.gain.exponentialRampToValueAtTime(volume,at+.008);g.gain.exponentialRampToValueAtTime(.001,at+duration);
+    g.connect(audio.destination);source.start(at);source.stop(at+duration);
+  }catch{soundOn=false;syncMusic();document.getElementById('sound').innerHTML='♪ <span>Ljud otillgängligt</span>';}
+}
+function sfx(kind,strength=1){
+  switch(kind){
+    case 'jump':case 'doubleJump':{
+      const pitch=kind==='jump'?340:520;
+      tone(pitch,.16,'triangle',.075,0,pitch*1.7);tone(pitch/2,.09,'sine',.045,0,pitch/3);break;
+    }
+    case 'step':tone(900,.045,'noise',.035*strength,0,260);break;
+    case 'land':tone(115,.13,'sine',.10*strength,0,48);tone(750,.09,'noise',.09*strength,0,180);break;
+    case 'attack':tone(2400,.12,'noise',.075,0,300);tone(170,.09,'triangle',.035,0,65);break;
+    case 'crystal':tone(1046.5,.15,'sine',.065,0,1046.5);tone(1568,.22,'sine',.045,.045,1568);break;
+    case 'hit':tone(150,.13,'triangle',.07,0,55);tone(1200,.07,'noise',.07,0,250);break;
+    case 'snor':tone(450,.12,'triangle',.06,0,160);tone(1400,.08,'noise',.05,0,500);break;
+  }
+}
+function syncMusic() {
+  if(soundOn&&mode==='playing')music.play().catch(()=>{});
+  else music.pause();
 }
 function showOverlay(tag,title,copy,button) {
+  syncMusic();
   document.getElementById('level-choice').hidden=true;
   document.getElementById('overlay-tag').textContent=tag;document.getElementById('overlay-title').textContent=title;document.getElementById('overlay-copy').textContent=copy;
   play.innerHTML=button+' <span>→</span>';document.getElementById('start-hint').textContent='eller tryck på ↑ eller mellanslag';overlay.hidden=false;
 }
-function start() {tone(540);if(mode==='paused'){mode='playing';}else{reset(mode==='levelComplete'?levelNumber+1:mode==='won'?1:levelNumber);mode='playing';}overlay.hidden=true;document.getElementById('pause').textContent='Ⅱ';canvas.focus();last=performance.now();}
-function pause() {if(mode==='playing'){mode='paused';keys.clear();showOverlay('TA EN ANDEPAUS','Djungeln vilar.','Äventyret finns kvar precis där du lämnade det.','Fortsätt');document.getElementById('pause').textContent='▶';}else if(mode==='paused'){mode='playing';overlay.hidden=true;document.getElementById('pause').textContent='Ⅱ';last=performance.now();}}
+function start() {tone(540);if(mode==='paused'){mode='playing';}else{reset(mode==='levelComplete'?levelNumber+1:mode==='won'?1:levelNumber);mode='playing';}overlay.hidden=true;document.getElementById('pause').textContent='Ⅱ';canvas.focus();last=performance.now();syncMusic();}
+function pause() {if(mode==='playing'){mode='paused';keys.clear();showOverlay('TA EN ANDEPAUS','Djungeln vilar.','Äventyret finns kvar precis där du lämnade det.','Fortsätt');document.getElementById('pause').textContent='▶';}else if(mode==='paused'){mode='playing';overlay.hidden=true;document.getElementById('pause').textContent='Ⅱ';last=performance.now();syncMusic();}}
 play.addEventListener('click',start);
 document.getElementById('level-select').addEventListener('change',()=>{
   const level=Number(document.getElementById('level-select').value);
-  if(mode==='ready'&&[1,2,3,4,5,6,7,8,9].includes(level))reset(level);
+  if(mode==='ready'&&[1,2,3,4,5,6,7,8,9,10].includes(level))reset(level);
 });
 document.getElementById('pause').addEventListener('click',pause);
-document.getElementById('sound').addEventListener('click',()=>{soundOn=!soundOn;const b=document.getElementById('sound');b.innerHTML='♪ <span>Ljud '+(soundOn?'på':'av')+'</span>';b.setAttribute('aria-label',soundOn?'Stäng av ljud':'Slå på ljud');tone(540);});
+document.getElementById('sound').addEventListener('click',()=>{soundOn=!soundOn;syncMusic();const b=document.getElementById('sound');b.innerHTML='♪ <span>Ljud '+(soundOn?'på':'av')+'</span>';b.setAttribute('aria-label',soundOn?'Stäng av ljud':'Slå på ljud');tone(540);});
 const gameShell=document.getElementById('game-shell');
 function syncFullscreen(){
   const expanded=!!document.fullscreenElement||gameShell.classList.contains('game-expanded');
@@ -111,7 +149,7 @@ function press(code,repeat=false) {
   
   if(['Space','ArrowUp'].includes(code)&&!repeat){if(mode!=='playing'){start();return;}if(code!=='ArrowUp'||!nearbyTree())jumpBuffer=.14;}
   if(code==='KeyC'&&!repeat&&levelNumber===7&&mode==='playing'&&player.invisibilityCooldown===0){player.invisible=5;player.invisibilityCooldown=8;tone(360,.25,'triangle');}
-  if(code==='KeyX'&&!repeat&&mode==='playing'&&player.attackCooldown===0){player.invisible=0;player.attack=.18;player.attackCooldown=.35;tone(180,.12,'sawtooth');}
+  if(code==='KeyX'&&!repeat&&mode==='playing'&&player.attackCooldown===0){player.invisible=0;player.attack=.18;player.attackCooldown=.35;sfx('attack');}
   if(code==='Escape'&&!repeat){if(gameShell.classList.contains('game-expanded')){gameShell.classList.remove('game-expanded');syncFullscreen();return;}pause();}
   keys.add(code);
 }
@@ -127,10 +165,17 @@ for(const button of document.querySelectorAll('[data-key]')) {
 function burst(x,y,color,count=10){for(let i=0;i<count;i++)particles.push({x,y,vx:(Math.random()-.5)*180,vy:-Math.random()*180,life:.65,color});}
 function hurt(enemy=true){
   if(player.invincible>0||(enemy&&player.firePower>0))return;
+  respawn();
+}
+function respawn(){
+  boogers=[];
   tone(100,.3,'sawtooth',.025);burst(player.x,player.y+25,'#bd98e7');
   player.x=checkpoint;player.h=68;player.crouching=false;player.y=levelNumber===6?checkpointY:ground-player.h;
   if(levelNumber===6)cameraY=Math.min(0,player.y-280);
-  player.vx=0;player.vy=0;player.jumps=0;player.attack=0;player.attackCooldown=0;player.grounded=true;jumpBuffer=0;coyote=0;player.invincible=2;camera=Math.max(0,checkpoint-canvas.width*.3);
+  player.vx=0;player.vy=0;player.stepDistance=0;player.jumps=0;player.attack=0;player.attackCooldown=0;player.grounded=true;jumpBuffer=0;coyote=0;player.invincible=2;camera=Math.max(0,checkpoint-canvas.width*.3);
+}
+function saveTreeCheckpoint(x,top){
+  if(levelNumber===6&&top-68<checkpointY){checkpoint=x-player.w/2;checkpointY=top-68;}
 }
 function intersects(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function clawBox(){if(levelNumber===9)return {x:player.face>0?player.x-105:player.x+player.w,y:player.y+player.h*.25,w:105,h:player.h*.75};return {x:player.face>0?player.x+player.w:player.x-62,y:player.y+player.h*.25,w:62,h:player.h*.75};}
@@ -266,6 +311,27 @@ function burnEnemy(e){
   if(player.firePower<=0||!intersects(player,e))return false;
   e.dead=true;burst(e.x+e.w/2,e.y+e.h/2,'#ff8638',18);tone(320,.15,'triangle');return true;
 }
+function updateViking(e,dt){
+  e.dir=player.x+player.w/2<e.x+e.w/2?-1:1;
+  e.cooldown=Math.max(0,e.cooldown-dt);
+  if(e.windup>0){
+    e.windup=Math.max(0,e.windup-dt);
+    if(e.windup===0){
+      const x=e.x+e.w/2+e.dir*28,y=e.y+24,flight=.9;
+      boogers.push({x,y,w:16,h:14,vx:(player.x+player.w/2-x)/flight,vy:(player.y+player.h/2-y-350*flight*flight)/flight,life:2.5,dead:false});
+      e.cooldown=1.8;sfx('snor');
+    }
+  }else if(e.cooldown===0&&Math.abs(player.x-e.x)<520&&Math.abs(player.y-e.y)<220)e.windup=.55;
+}
+function updateBoogers(dt){
+  for(const shot of boogers){
+    shot.life-=dt;shot.vy+=700*dt;shot.x+=shot.vx*dt;shot.y+=shot.vy*dt;
+    if(player.attack>0&&intersects(clawBox(),shot)){shot.dead=true;burst(shot.x,shot.y,'#a7d85a',7);sfx('hit');}
+    else if(intersects(player,shot)){shot.dead=true;burst(shot.x,shot.y,'#a7d85a',9);hurt();break;}
+    else if(platforms.some(p=>intersects(shot,p))){shot.dead=true;burst(shot.x,shot.y,'#a7d85a',5);}
+  }
+  boogers=boogers.filter(shot=>!shot.dead&&shot.life>0&&shot.x>-50&&shot.x<worldWidth+50);
+}
 function update(dt){
   if(mode!=='playing')return;
   player.firePower=Math.max(0,player.firePower-dt);
@@ -279,30 +345,45 @@ function update(dt){
   player.crouching=!climbing&&keys.has('ArrowDown')&&player.grounded&&jumpBuffer===0;
   const height=player.crouching?32:68;player.y+=player.h-height;player.h=height;
   const direction=(keys.has('ArrowRight')?1:0)-(keys.has('ArrowLeft')?1:0);
-  player.vx=direction*(player.crouching?130:285);if(direction)player.face=direction;
-  if(jumpBuffer>0&&(coyote>0||player.jumps<2)){player.jumps=(coyote>0?0:Math.max(1,player.jumps))+1;player.vy=-640;player.grounded=false;coyote=0;jumpBuffer=0;tone(player.jumps===2?620:420,.17,'triangle');}
+  const wasGrounded=player.grounded,previousX=player.x,targetSpeed=direction*(player.crouching?130:285);
+  const acceleration=direction?(wasGrounded?2600:1900):(wasGrounded?3200:1200);
+  player.vx+=Math.max(-acceleration*dt,Math.min(acceleration*dt,targetSpeed-player.vx));if(direction)player.face=direction;
+  if(jumpBuffer>0&&(coyote>0||player.jumps<2)){player.jumps=(coyote>0?0:Math.max(1,player.jumps))+1;player.vy=-640;player.grounded=false;coyote=0;jumpBuffer=0;sfx(player.jumps===2?'doubleJump':'jump');}
   if(climbing){player.vy=keys.has('ArrowUp')?-190:190;player.jumps=0;}
-  else player.vy=Math.min(player.vy+1650*dt,950);
-  player.x=Math.max(0,Math.min((levelNumber===6?700:worldWidth)-player.w,player.x+player.vx*dt));
-  if(boss)player.x=Math.max(5200,player.x);
-  for(const p of platforms){if(p.h>100&&intersects(player,p)){if(player.vx>0)player.x=p.x-player.w;else if(player.vx<0)player.x=p.x+p.w;}}
+  else player.vy=Math.min(player.vy+(player.vy<0?1650:2200)*dt,950);
+  const nextX=player.x+player.vx*dt;
+  player.x=Math.max(boss?5200:0,Math.min((levelNumber===6?700:worldWidth)-player.w,nextX));
+  if(player.x!==nextX)player.vx=0;
+  for(const p of platforms){if(p.h>100&&intersects(player,p)){if(player.vx>0)player.x=p.x-player.w;else if(player.vx<0)player.x=p.x+p.w;player.vx=0;}}
   const previousBottom=player.y+player.h;player.y+=player.vy*dt;player.grounded=false;
-  if(climbing){player.y=Math.max(trunk.top-player.h,Math.min(trunk.bottom-player.h,player.y));if(player.y+player.h===trunk.top||player.y+player.h===trunk.bottom)player.vy=0;}
-  for(const p of platforms){if(climbing&&p.h===30)continue;if(player.x<p.x+p.w&&player.x+player.w>p.x&&player.vy>=0&&previousBottom<=p.y&&player.y+player.h>=p.y){player.y=p.y-player.h;player.vy=0;player.grounded=true;player.jumps=0;if(levelNumber===6&&p.y-player.h<checkpointY){checkpoint=player.x;checkpointY=p.y-player.h;}}else if(p.h>100&&player.vy<0&&intersects(player,p)){player.y=p.y+p.h;player.vy=0;}}
-  for(const coin of coins){if(!coin.taken&&Math.abs(player.x+player.w/2-coin.x)<30&&Math.abs(player.y+player.h/2-coin.y)<45){coin.taken=true;collected++;if(collected%3===0){player.firePower=10;burst(player.x+player.w/2,player.y+35,'#ff8638',24);tone(660,.3,'triangle',.15,0,1320);}if(levelNumber===5)document.getElementById('location-name').textContent='TRÄDKRISTALLER '+collected+' / 3';if(levelNumber===4)revealTimer=3;burst(coin.x,coin.y,levelNumber===4?'#90ff9c':'#f7d47e');tone(850,.1);updateHud();}}
+  if(climbing){
+    player.y=Math.max(trunk.top-player.h,Math.min(trunk.bottom-player.h,player.y));
+    if(player.y+player.h===trunk.top){player.vy=0;player.grounded=true;saveTreeCheckpoint(trunk.x,trunk.top);}
+    else if(player.y+player.h===trunk.bottom)player.vy=0;
+  }
+  const landingSpeed=player.vy;
+  for(const p of platforms){if(climbing&&p.h===30)continue;if(player.x<p.x+p.w&&player.x+player.w>p.x&&player.vy>=0&&previousBottom<=p.y&&player.y+player.h>=p.y){player.y=p.y-player.h;player.vy=0;player.grounded=true;player.jumps=0;saveTreeCheckpoint(p.x+p.w/2,p.y);}else if(p.h>100&&player.vy<0&&intersects(player,p)){player.y=p.y+p.h;player.vy=0;}}
+  if(player.grounded&&!wasGrounded&&landingSpeed>180)sfx('land',Math.min(1,landingSpeed/950));
+  if(player.grounded&&!climbing){
+    player.stepDistance+=Math.abs(player.x-previousX);
+    if(player.stepDistance>=72){sfx('step',player.crouching?.45:1);player.stepDistance%=72;}
+  }else player.stepDistance=0;
+  for(const coin of coins){if(!coin.taken&&Math.abs(player.x+player.w/2-coin.x)<30&&Math.abs(player.y+player.h/2-coin.y)<45){coin.taken=true;collected++;if(collected%3===0){player.firePower=10;burst(player.x+player.w/2,player.y+35,'#ff8638',24);tone(660,.3,'triangle',.15,0,1320);}if(levelNumber===5)document.getElementById('location-name').textContent='TRÄDKRISTALLER '+collected+' / 3';if(levelNumber===4)revealTimer=3;burst(coin.x,coin.y,levelNumber===4?'#90ff9c':'#f7d47e');sfx('crystal');updateHud();}}
   for(const e of enemies){if(e.dead||burnEnemy(e))continue;
-    if(e.kind==='livingTree'){if(player.attack>0&&intersects(clawBox(),e)){e.dead=true;burst(e.x+33,e.y+80,'#b6cd8c');tone(260,.1,'triangle');}else updateLivingTree(e,dt);continue;}
-    if(e.kind==='dog')updateDog(e,dt);
+    if(e.kind==='livingTree'){if(player.attack>0&&intersects(clawBox(),e)){e.dead=true;burst(e.x+33,e.y+80,'#b6cd8c');sfx('hit');}else updateLivingTree(e,dt);continue;}
+    if(e.kind==='viking')updateViking(e,dt);
+    else if(e.kind==='dog')updateDog(e,dt);
     else e.x+=e.dir*(e.kind==='fly'?95:e.kind==='ghost'?75:e.kind==='zombie'?35:55)*dt;if(Math.abs(e.x-e.origin)>(e.kind==='beetle'&&e.y<200?30:70))e.dir*=-1;
     if(e.kind==='fly')e.y=ground-130+Math.sin(time*5+e.origin)*45;
     if(e.kind==='ghost')e.y=ground-120+Math.sin(time*2+e.origin)*28;
     if(burnEnemy(e))continue;
-    if(player.attack>0&&intersects(clawBox(),e)){e.dead=true;burst(e.x+24,e.y,'#bd98e7');tone(260,.1,'triangle');continue;}
+    if(player.attack>0&&intersects(clawBox(),e)){e.dead=true;burst(e.x+24,e.y,'#bd98e7');sfx('hit');continue;}
     if(e.kind==='dog'&&e.grace>0)continue;
-    if(intersects(player,e)){if(player.vy>0&&previousBottom<=e.y+15){e.dead=true;player.vy=-420;burst(e.x+24,e.y,'#dca56a');tone(240,.1,'triangle');}else{hurt();break;}}
+    if(intersects(player,e)){if(player.vy>0&&previousBottom<=e.y+15){e.dead=true;player.vy=-420;burst(e.x+24,e.y,'#dca56a');sfx('hit');}else{hurt();break;}}
   }
+  updateBoogers(dt);
   for(const poop of poops)if(intersects(player,poop)){hurt(false);break;}
-  if(player.y>(levelNumber===6?cameraY+800:720))hurt(false);
+  if(player.y>(levelNumber===6?cameraY+canvas.height:720))respawn();
   if(levelNumber!==6&&player.x>2210&&player.x<3100&&player.grounded)checkpoint=2210;
   if(levelNumber!==6&&player.x>4470&&player.grounded)checkpoint=4470;
   if(levelNumber===5&&player.x>5480&&collected===3){mode='levelComplete';keys.clear();victorySound();showOverlay('TRÄDKRISTALLERNA ÄR RÄDDADE','Bana sex väntar!','Fortsätt uppåt och hoppa mellan träden på vägen mot molnen!','Till bana sex');}
@@ -313,13 +394,14 @@ function update(dt){
   }
   if(levelNumber===7&&player.x>5480&&mode==='playing'){mode='levelComplete';keys.clear();victorySound();showOverlay('TRÄDEN TAPPAR BORT DIG','Bana åtta väntar!','Flugor och stinkande hinder väntar på nästa stig!','Till bana åtta');}
   if(levelNumber===8&&player.x>5480&&mode==='playing'){mode='levelComplete';keys.clear();victorySound();showOverlay('STINKSKOGEN ÄR AVKLARAD','Bana nio väntar!','Hundar teleporterar bakom dig. Försvara dig med svansen!','Till bana nio');}
-  if(levelNumber===9&&player.x>5480&&mode==='playing'){mode='won';keys.clear();victorySound();showOverlay('HUNDARNA ÄR ÖVERLISTADE','Du klarade alla nio banor!','Ottomans svans räddade dagen!','Spela från början');}
+  if(levelNumber===9&&player.x>5480&&mode==='playing'){mode='levelComplete';keys.clear();victorySound();showOverlay('HUNDARNA ÄR ÖVERLISTADE','Bana tio väntar!','Borda vikingaskeppet och se upp för flygande snorkråkor!','Till vikingaskeppet');}
+  if(levelNumber===10&&player.x>5480&&mode==='playing'){mode='won';keys.clear();boogers=[];victorySound();showOverlay('VIKINGARNA ÄR BESEGRADE','Du klarade alla tio banor!','Ottoman tog sig förbi snorstormen och nådde drakstäven!','Spela från början');}
   if(boss){checkpoint=5200;updateBoss(dt);}
   camera=Math.max(0,Math.min((levelNumber===6?700:worldWidth)-canvas.width,player.x-canvas.width*.33));
   if(levelNumber===6){
     cameraY=Math.min(cameraY,player.y-280);
     document.getElementById('progress-fill').style.width=Math.min(100,(ground-player.y-player.h)/(ground-skyTrees.at(-1).top)*100)+'%';
-    if(player.y+player.h<=skyTrees.at(-1).top+1&&Math.abs(player.x+player.w/2-skyTrees.at(-1).x)<100){mode='levelComplete';keys.clear();victorySound();showOverlay('DU NÅDDE MOLNEN','Bana sju väntar!','Smyg förbi de levande träden med din nya osynlighetsförmåga.','Till bana sju');}
+    if(player.grounded&&player.y+player.h<=skyTrees.at(-1).top+1&&Math.abs(player.x+player.w/2-skyTrees.at(-1).x)<100){mode='levelComplete';keys.clear();victorySound();showOverlay('DU NÅDDE MOLNEN','Bana sju väntar!','Smyg förbi de levande träden med din nya osynlighetsförmåga.','Till bana sju');}
   }else document.getElementById('progress-fill').style.width=Math.min(100,player.x/5480*100)+'%';
   document.getElementById('fire-status').hidden=player.firePower<=0;document.getElementById('fire-status').textContent='🔥 ELDKRAFT '+Math.ceil(player.firePower)+' SEK';
   for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=380*dt;p.life-=dt;}particles=particles.filter(p=>p.life>0);
@@ -335,7 +417,42 @@ function tree(x,y,height,width,color,foliage){
   line([[x,y-height*.65],[x+width*2,y-height*.8],[x+width*3,y-height*.9]],color,width*.5);
   if(levelNumber!==3)for(let i=0;i<8;i++){const a=i*2.4;ellipse(x+Math.sin(a)*width*3,y-height+Math.cos(a)*30,width*2.1,50,foliage,a*.15);}
 }
+function shipBackground(){
+  const w=canvas.width,sky=ctx.createLinearGradient(0,0,0,640);
+  sky.addColorStop(0,'#263d62');sky.addColorStop(.65,'#a8c8cd');sky.addColorStop(1,'#315b6d');ctx.fillStyle=sky;ctx.fillRect(0,0,w,640);
+  ellipse(w*.78,110,47,47,'#f2dfad');
+  for(let i=-1;i<w/400+2;i++){
+    const x=i*400-camera*.12%400;
+    shape([[x-100,410],[x+75,210],[x+140,280],[x+240,175],[x+420,410]],'#526f80');
+    shape([[x+185,235],[x+240,175],[x+285,232],[x+245,215],[x+222,230]],'#cfdfdf');
+    ellipse(x+70,110,65,13,'#e9f1e43b');ellipse(x+160,85,95,15,'#e9f1e43b');
+  }
+  ctx.fillStyle='#285f73';ctx.fillRect(0,405,w,235);
+  for(let row=0;row<5;row++)for(let i=-1;i<w/150+2;i++){
+    const x=i*150-camera*.2%150+Math.sin(time*.7+row)*20,y=423+row*45;
+    line([[x,y],[x+35,y-5],[x+75,y+4],[x+115,y]],row%2?'#81b2b46b':'#c0d9d459',2);
+  }
+  for(const mast of [1000,2850,4700]){
+    const x=mast-camera;if(x<-350||x>w+350)continue;
+    line([[x,ground],[x,40]],'#4e332b',17);line([[x-245,90],[x+245,90]],'#67432d',10);
+    for(let i=0;i<8;i++){
+      const left=x-232+i*58,billow=Math.sin(time*1.5)*7;
+      shape([[left,96],[left+58,96],[left+58+billow,300],[left+billow,300]],i%2?'#a9483d':'#ecdfba');
+    }
+    line([[x-230,98],[x-270,ground],[x,50],[x+270,ground],[x+230,98]],'#d4bd8c',2);
+    ellipse(x,198,42,42,'#e2c981');line([[x-20,208],[x,171],[x+20,208],[x-20,208]],'#884f38',6);
+  }
+  line([[30-camera,ground],[30-camera,ground-115]],'#755032',20);
+  const bow=5600-camera;
+  if(bow<w+100&&bow>-100){
+    line([[bow-30,ground],[bow+12,ground-90],[bow,ground-190]],'#9a683b',26);
+    shape([[bow-13,ground-185],[bow-65,ground-221],[bow-38,ground-243],[bow+24,ground-218],[bow+31,ground-177]],'#b17b42');
+    shape([[bow-37,ground-236],[bow-25,ground-260],[bow-10,ground-230]],'#dfc088');ellipse(bow-26,ground-222,4,4,'#f5d966');
+    line([[bow-60,ground-218],[bow-39,ground-210]],'#503329',4);
+  }
+}
 function background(){
+  if(levelNumber===10){shipBackground();return;}
   const w=canvas.width,g=ctx.createLinearGradient(0,0,0,640);g.addColorStop(0,levelNumber===4?'#081f22':levelNumber===3?'#17192f':levelNumber===2?'#302d50':'#143f3b');g.addColorStop(.5,levelNumber===4?'#246957':levelNumber===3?'#535570':levelNumber===2?'#85855d':'#4c8a64');g.addColorStop(1,levelNumber===4?'#132f29':levelNumber===3?'#293541':levelNumber===2?'#314838':'#214e3c');ctx.fillStyle=g;ctx.fillRect(0,0,w,640);
   if(levelNumber===3){ellipse(w*.7,130,46,46,'#dcded699');ellipse(w*.7-13,121,10,8,'#b4bbc559');}
   const glow=ctx.createRadialGradient(w*.65,165,8,w*.65,165,360);glow.addColorStop(0,'#d0ddb33b');glow.addColorStop(1,'#c3d89900');ctx.fillStyle=glow;ctx.fillRect(0,0,w,640);
@@ -368,7 +485,23 @@ function background(){
     }
   }
 }
-function platform(p){const x=p.x-camera;if(x+p.w<0||x>canvas.width)return;ctx.fillStyle=p.h>100?'#293328':'#4d4735';ctx.fillRect(x,p.y,p.w,p.h);
+function platform(p){const x=p.x-camera;if(x+p.w<0||x>canvas.width)return;
+  if(levelNumber===10){
+    ctx.fillStyle=p.h>100?'#59382c':'#9a6c43';ctx.fillRect(x,p.y,p.w,p.h);
+    line([[x,p.y+3],[x+p.w,p.y+3]],'#dab17a',6);
+    for(let y=p.y+18;y<p.y+p.h;y+=22)line([[x,y],[x+p.w,y]],'#302b2b',2);
+    if(p.h>100){
+      for(let i=0;i<p.w/160;i++){
+        const sx=x+80+i*160;if(sx<-30||sx>canvas.width+30)continue;
+        line([[sx-40,p.y+9],[sx-40,p.y+90]],'#8c6040',3);ellipse(sx,p.y+47,25,25,'#c3a570');ellipse(sx,p.y+47,21,21,i%2?'#4b7380':'#a24e3b');
+        line([[sx-20,p.y+47],[sx+20,p.y+47]],'#d5bb7b',3);line([[sx,p.y+27],[sx,p.y+67]],'#d5bb7b',3);ellipse(sx,p.y+47,8,8,'#bcc3b7');
+      }
+    }else{
+      line([[x+12,p.y],[x+12,p.y-100]],'#d7c19b',3);line([[x+p.w-12,p.y],[x+p.w-12,p.y-100]],'#d7c19b',3);
+    }
+    return;
+  }
+  ctx.fillStyle=p.h>100?'#293328':'#4d4735';ctx.fillRect(x,p.y,p.w,p.h);
   const gradient=ctx.createLinearGradient(0,p.y,0,p.y+p.h);gradient.addColorStop(0,'#5b6240');gradient.addColorStop(1,'#192b24');ctx.fillStyle=gradient;ctx.fillRect(x,p.y+8,p.w,p.h-8);
   for(let i=0;i<p.w/34;i++){ctx.fillStyle=i%2?'#798452':'#647948';ctx.fillRect(x+i*34,p.y,34,7);shape([[x+i*34,p.y+6],[x+i*34+12,p.y+18+(i%3)*5],[x+i*34+20,p.y+6]],'#527745');}
   for(let i=0;i<p.w/65;i++){const offset=i*65;line([[x+offset+15,p.y+28],[x+offset+40,p.y+28],[x+offset+49,p.y+46]],'#77816127',2);}
@@ -429,6 +562,20 @@ function drawStealthMonster(x,y,scale=1,face=1,visible=false,attacking=false){
   ctx.restore();
 }
 function enemy(e){const x=e.x-camera;if(x<-80||x>canvas.width+80||e.dead)return;
+  if(e.kind==='viking'){
+    ctx.save();ctx.translate(x+22,e.y+e.h);ctx.scale(e.dir,1);
+    ellipse(0,1,27,5,'#0003');line([[-10,-22],[-12,-2]],'#3d3432',12);line([[10,-22],[12,-2]],'#3d3432',12);
+    shape([[-20,-51],[17,-51],[22,-21],[-21,-21]],'#536c70');line([[-20,-27],[20,-27]],'#b69656',6);
+    ellipse(0,-57,18,17,'#e3b487');shape([[-17,-56],[18,-56],[12,-34],[1,-27],[-12,-36]],'#b8773f');
+    ellipse(-7,-59,2,2,'#26323a');ellipse(7,-59,2,2,'#26323a');ellipse(12,-53,8,5,'#efc69a');
+    shape([[-20,-64],[-15,-78],[0,-85],[16,-78],[20,-64]],'#aab8b7');line([[0,-82],[0,-57]],'#dbe0cd',4);
+    shape([[-16,-74],[-29,-87],[-28,-71],[-18,-65]],'#e7d4a5');shape([[16,-74],[29,-87],[28,-71],[18,-65]],'#e7d4a5');
+    line([[-15,-46],[-27,-33]],'#d6a578',9);ellipse(-26,-33,16,18,'#be985c');ellipse(-26,-33,12,14,'#9b4c3c');ellipse(-26,-33,5,5,'#bcc3b7');
+    const handY=e.windup>0?-72:-40;
+    line([[15,-46],[28,handY]],'#e3b487',9);
+    if(e.windup>0)ellipse(29,handY,8,6,'#a8c94e');ctx.restore();
+    if(e.windup>0){ctx.fillStyle='#e8f4ad';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText('SNOR!',x+22,e.y-23);}return;
+  }
   if(e.kind==='dog'){
     ctx.save();ctx.translate(x+26,e.y+e.h);ctx.scale(e.dir,1);
     ellipse(0,-18,25,14,'#b98250');line([[-14,-10],[-16,0]],'#765337',7);line([[13,-10],[15,0]],'#956740',7);
@@ -579,10 +726,13 @@ function render(){
   }
   for(const p of poops){const x=p.x-camera;if(x+p.w<0||x>canvas.width)continue;ellipse(x+32,ground-7,32,9,'#684022');ellipse(x+31,ground-19,25,10,'#85532b');ellipse(x+28,ground-30,16,9,'#9c6839');line([[x+20,ground-35],[x+26,ground-40],[x+34,ground-34]],'#a77643',6);for(let i=0;i<2;i++)line([[x+12+i*28,ground-52],[x+18+i*28,ground-64],[x+13+i*28,ground-76]],'#a8bd5b55',2);}
   for(const e of enemies)enemy(e);drawBoss();panther();
+  for(const shot of boogers){const x=shot.x-camera;line([[x-shot.vx*.025,shot.y-shot.vy*.025],[x+8,shot.y+7]],'#aac95c77',6);ellipse(x+8,shot.y+7,10,8,'#809e35',time*6);ellipse(x+5,shot.y+4,4,3,'#d4e887');}
   for(const p of particles){ctx.globalAlpha=p.life/.65;ellipse(p.x-camera,p.y,3,3,p.color);}ctx.globalAlpha=1;ctx.restore();
   // Foreground leaves frame the world without blocking the jumping path.
-  for(let i=-1;i<canvas.width/330+1;i++){const x=i*330-camera*.7%330;fern(x,654,62,'#102f25');leaf(x+100,660,75,'#163b29',.9);}
-  for(let i=0;i<canvas.width/220+1;i++){const x=i*220-camera*.5%220;leaf(x,-5,95,'#12382b',2.5);leaf(x+20,-5,72,'#18432e',-2.6);}
+  if(levelNumber!==10){
+    for(let i=-1;i<canvas.width/330+1;i++){const x=i*330-camera*.7%330;fern(x,654,62,'#102f25');leaf(x+100,660,75,'#163b29',.9);}
+    for(let i=0;i<canvas.width/220+1;i++){const x=i*220-camera*.5%220;leaf(x,-5,95,'#12382b',2.5);leaf(x+20,-5,72,'#18432e',-2.6);}
+  }
   const vignette=ctx.createLinearGradient(0,0,0,640);vignette.addColorStop(0,'#061e2240');vignette.addColorStop(.3,'#061e2200');vignette.addColorStop(.8,'#061e2200');vignette.addColorStop(1,'#061e2250');ctx.fillStyle=vignette;ctx.fillRect(0,0,canvas.width,640);
 }
 function resize(){const r=canvas.getBoundingClientRect();canvas.width=Math.round(640*r.width/r.height);canvas.height=640;}
